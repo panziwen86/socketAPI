@@ -90,6 +90,6 @@ int main(int argc, char** argv)
 
     getchar();
     close(clientFd);
-    printf("app end.....\n");
+    printf("app end......\n");
     return 0;
 }
