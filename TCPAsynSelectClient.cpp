@@ -47,7 +47,6 @@ int main(int argc, char** argv)
     char sendBuf[sendBufSize];
     int sendLen;
     int totalSize = 0;
-    sleep(20);
     while(1)
     {
         struct timeval timeout;
