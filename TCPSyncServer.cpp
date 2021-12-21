@@ -7,6 +7,7 @@
 #include<errno.h>
 #include<string.h>
 #include<unistd.h>
+#include"common.h"
 
 int main(int argc, char** argv)
 {
@@ -72,14 +73,17 @@ int main(int argc, char** argv)
          return 1;
     }
     printf("client socket recv buff set size is: %d\n", defRcvBufSize);
-    getchar();
+    //getchar();
     char recvBuf[1024];
+    long long totalSize = 0;
+    long long startTime = GetTick();
     while(1)
     {
         int recvlen = recv(clientFd, recvBuf, sizeof(recvBuf), 0);
         if(recvlen > 0)
         {
-            printf("recv len:%d\n", recvlen);
+            totalSize += recvlen;
+            printf("recv total size:%lld\n", totalSize);
             continue;
         }
         else if(recvlen == 0)
