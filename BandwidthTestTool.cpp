@@ -11,8 +11,8 @@
 #include<string>
 #include<stdlib.h>
 
-int TcpClientSend(char* serverIp, unsigned short serverPort);
-int TcpServerRecv(unsigned short port);
+int TcpClient(char* serverIp, unsigned short serverPort, bool bSend);
+int TcpServer(unsigned short port, bool bSend);
 
 int main(int argc, char** argv)
 {
@@ -21,24 +21,37 @@ int main(int argc, char** argv)
     {
         type = argv[1];
     }
-    if(argc < 3 || (type != "s" && type != "c") || (type == "c" && argc < 4))
+    if(argc < 3 || (type != "ss" && type != "sr" && type != "cs" && type != "cr") 
+        || ((type == "cs" || type == "cr") && argc < 4))
     {
-        printf("Usage:\nServer: %s s listenPort\nClient: %s c serverIp serverPort\n", argv[0], argv[0]);
+        printf("Usage:\n"
+                    "Server send data: %s ss listenPort\n"
+                    "Server recv data: %s sr listenPort\n"
+                    "Client send data: %s cs serverIp serverPort\n"
+                    "Client recv data: %s cr serverIp serverPort\n", argv[0], argv[0], argv[0], argv[0]);
         return 1;
     }
-    if(type == "s")
+    if(type == "sr")
     {
-        TcpServerRecv(atoi(argv[2]));
+        TcpServer(atoi(argv[2]), false);
+    }
+    else if(type == "cs")
+    {
+        TcpClient(argv[2], atoi(argv[3]), true);
+    }
+    else if(type == "ss")
+    {
+        TcpServer(atoi(argv[2]), true);
     }
     else
     {
-        TcpClientSend(argv[2], atoi(argv[3]));
+        TcpClient(argv[2], atoi(argv[3]), false);
     }
 
     return 0;
 }
 
-int TcpClientSend(char* serverIp, unsigned short serverPort)
+int TcpClient(char* serverIp, unsigned short serverPort, bool bSend)
 {
     int clientFd;
     struct sockaddr_in serverAddr;
@@ -62,38 +75,73 @@ int TcpClientSend(char* serverIp, unsigned short serverPort)
         return 1;
     }
     printf("client connected server\n", clientFd);
-    printf("start send data...\n");
-    const int sendBufSize = 10240;
-    char sendBuf[sendBufSize];
-    int sendLen;
+    int setBufSize = 1024*20;
+    socklen_t optlen = sizeof(setBufSize);
+    const int dataBufSize = 1024*10;
+    char dataBuf[dataBufSize];
+    int dataLen;
     long long totalSize = 0;
     long long startTime = GetTick();
     long long lastPrintTime = startTime;
-    while(1)
+    if(bSend)
     {
-        //这里如果对方关闭了socket一段时间(如果是同步send只有几秒，异步send，时间要久点)后，再send时会收到SIGPIPE信号
-        if((sendLen = send(clientFd, sendBuf, sendBufSize, 0)) < 0)
+        if (setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &setBufSize, optlen) < 0)
         {
-            printf("send error:%d,%s\n", errno, strerror(errno));
-            close(clientFd);
+            printf("setsockopt SO_SNDBUF error:%d,%s\n", errno, strerror(errno));
             return 1;
         }
-        totalSize += sendLen;
-        long long curTime = GetTick();
-        if(curTime - lastPrintTime >= 3*1000)
+        printf("start send data...\n");
+        while(1)
         {
-            double times = (curTime - startTime)/1000.0;
-            double speedbps = (totalSize * 8.0) / times;
-            printf("send data total size:%dk,speed:%.2fKbps,%.2fMbps\n", totalSize/1024, speedbps/1024, speedbps/1024/1024);
-            lastPrintTime = curTime;
+            //这里如果对方关闭了socket一段时间(如果是同步send只有几秒，异步send，时间要久点)后，再send时会收到SIGPIPE信号
+            if((dataLen = send(clientFd, dataBuf, dataBufSize, 0)) < 0)
+            {
+                printf("send error:%d,%s\n", errno, strerror(errno));
+                break;
+            }
+            totalSize += dataLen;
+            long long curTime = GetTick();
+            if(curTime - lastPrintTime >= 3*1000)
+            {
+                double times = (curTime - startTime)/1000.0;
+                double speedbps = (totalSize * 8.0) / times;
+                printf("send data total size:%dk,speed:%.2fKbps,%.2fMbps\n", totalSize/1024, speedbps/1024, speedbps/1024/1024);
+                lastPrintTime = curTime;
+            }
+            usleep(1000);
         }
-        usleep(1000);
+    }
+    else
+    {
+        if (setsockopt(clientFd, SOL_SOCKET, SO_RCVBUF, &setBufSize, optlen) < 0)
+        {
+            printf("setsockopt SO_RCVBUF error:%d,%s\n", errno, strerror(errno));
+            return 1;
+        }
+        printf("start recv data...\n");
+        while(1)
+        {
+            if((dataLen = recv(clientFd, dataBuf, sizeof(dataBufSize), 0)) <= 0)
+            {
+                printf("recv error:%d,%s\n", errno, strerror(errno));
+                break;
+            }
+            totalSize += dataLen;
+            long long curTime = GetTick();
+            if(curTime - lastPrintTime >= 3*1000)
+            {
+                double times = (curTime - startTime)/1000.0;
+                double speedbps = (totalSize * 8.0) / times;
+                printf("recv data total size:%dk,speed: %.2fKbps,%.2fMbps\n", totalSize/1024, speedbps/1024, speedbps/1024/1024);
+                lastPrintTime = curTime;
+            }
+        }
     }
     close(clientFd);
     return 0;
 }
 
-int TcpServerRecv(unsigned short port)
+int TcpServer(unsigned short port, bool bSend)
 {
     int listenFd;
     int clientFd;
@@ -139,23 +187,68 @@ int TcpServerRecv(unsigned short port)
         }
         printf("client connected fd:%d,addr:%s:%d\n", clientFd, inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
         //设置客户端socket接收缓冲区大小
-        int defRcvBufSize = 1024*10;
-        socklen_t optlen = sizeof(defRcvBufSize);
-        if (setsockopt(clientFd, SOL_SOCKET, SO_RCVBUF, &defRcvBufSize, optlen) < 0)
+        int setBufSize = 1024*20;
+        socklen_t optlen = sizeof(setBufSize);
+        if(bSend)
         {
-            printf("setsockopt SO_RCVBUF error:%d,%s\n", errno, strerror(errno));
-            return 1;
+            if (setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &setBufSize, optlen) < 0)
+            {
+                printf("setsockopt SO_SNDBUF error:%d,%s\n", errno, strerror(errno));
+                close(clientFd);
+                continue;
+            }
+            printf("start send data...\n");
         }
-        char recvBuf[10240];
+        else
+        {
+            if (setsockopt(clientFd, SOL_SOCKET, SO_RCVBUF, &setBufSize, optlen) < 0)
+            {
+                printf("setsockopt SO_RCVBUF error:%d,%s\n", errno, strerror(errno));
+                close(clientFd);
+                continue;
+            }
+            printf("start recv data...\n");
+        }
+        const int dataBufSize = 1024*10;
+        char dataBuf[dataBufSize];
+        int dataLen;
         long long totalSize = 0;
         long long startTime = GetTick();
         long long lastPrintTime = startTime;
-        while(1)
+        if(bSend)
         {
-            int recvlen = recv(clientFd, recvBuf, sizeof(recvBuf), 0);
-            if(recvlen > 0)
+            while(1)
             {
-                totalSize += recvlen;
+                //这里如果对方关闭了socket一段时间(如果是同步send只有几秒，异步send，时间要久点)后，再send时会收到SIGPIPE信号
+                if((dataLen = send(clientFd, dataBuf, dataBufSize, 0)) < 0)
+                {
+                    printf("send error:%d,%s\n", errno, strerror(errno));
+                    close(clientFd);
+                    break;
+                }
+                totalSize += dataLen;
+                long long curTime = GetTick();
+                if(curTime - lastPrintTime >= 3*1000)
+                {
+                    double times = (curTime - startTime)/1000.0;
+                    double speedbps = (totalSize * 8.0) / times;
+                    printf("send data total size:%dk,speed:%.2fKbps,%.2fMbps\n", totalSize/1024, speedbps/1024, speedbps/1024/1024);
+                    lastPrintTime = curTime;
+                }
+                usleep(1000);
+            }
+        }
+        else
+        {
+            while(1)
+            {
+                if((dataLen = recv(clientFd, dataBuf, sizeof(dataBufSize), 0)) <= 0)
+                {
+                    printf("recv error:%d,%s\n", errno, strerror(errno));
+                    close(clientFd);
+                    break;
+                }
+                totalSize += dataLen;
                 long long curTime = GetTick();
                 if(curTime - lastPrintTime >= 3*1000)
                 {
@@ -164,19 +257,6 @@ int TcpServerRecv(unsigned short port)
                     printf("recv data total size:%dk,speed: %.2fKbps,%.2fMbps\n", totalSize/1024, speedbps/1024, speedbps/1024/1024);
                     lastPrintTime = curTime;
                 }
-                continue;
-            }
-            else if(recvlen == 0)
-            {
-                printf("client closed error:%d,%s\n", errno, strerror(errno));
-                close(clientFd);
-                break;
-            }
-            else
-            {
-                printf("recv error:%d,%s\n", errno, strerror(errno));
-                close(clientFd);
-                break;
             }
         }
     }

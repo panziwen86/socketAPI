@@ -4,7 +4,7 @@ INCLUDELIST := $(addprefix -I,$(INCLUDEDIR))
 #LIBLIST := -L../installed/lib -lboost_system -lboost_filesystem -lboost_date_time -lboost_thread -pthread -lrt
 
 $(warning  $(INCLUDELIST)) 
-CXXFLAGS := -g -O2 $(INCLUDELIST)
+CXXFLAGS := -g -O2 $(INCLUDELIST) -static
 
 C_SRC := $(shell echo $(SRCDIR)/*.c)
 C_FILTER_SRC := $(SRCDIR)/*.c
